@@ -1,8 +1,12 @@
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
 import java.text.DateFormat;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.List;
 import java.util.HashMap;
 /**
@@ -14,7 +18,7 @@ import java.util.HashMap;
  * 
  */
 public class DataReader {
-    public List<Date> dates;
+    public List<Calendar> dates;
     
     public HashMap<String,Double[]> stocks;
 
@@ -22,7 +26,10 @@ public class DataReader {
     System.out.println("Reading Data");
     String line = "";  
     String splitBy = ","; 
-    stocks = new HashMap();
+    stocks = new HashMap<>();
+    
+    SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy");
+    
     
     try   
     {  
@@ -30,11 +37,13 @@ public class DataReader {
     BufferedReader br = new BufferedReader(new FileReader(fileName));  
     //read first line, the dates
     line = br.readLine();
-//    String[] rawDates = line.split(splitBy);
-//    dates = new List<>();
-//    for (String day: rawDates) {
-//      dates.add(Date.parse(day));
-//    }
+    String[] rawDates = line.split(splitBy);
+    dates = new ArrayList<Calendar>();
+    for (int i=2;i<rawDates.length; i++) {
+      Calendar cal = Calendar.getInstance();
+      cal.setTime(sdf.parse(rawDates[i]));
+      dates.add(cal);
+    }
     
    
     //read rest
@@ -55,11 +64,17 @@ public class DataReader {
        prices[i-2]=price;
     }
     stocks.put(ticker,prices); 
+    //System.out.println("Parsed "+ticker+" with a length of "+prices.length);
     }  
+    
+    br.close();
     }   
     catch (IOException e)   
     {  
     e.printStackTrace();  
+    } catch (ParseException e) {
+      System.out.println("Error occured while adding dates!");
+      e.printStackTrace();
     } 
     
     System.out.println("Complete");

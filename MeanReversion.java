@@ -1,6 +1,13 @@
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -22,40 +29,73 @@ public class MeanReversion {
     
     Set<String> tickers = data.stocks.keySet();
     
+    //convert to array for easier looping
+    int numTickers = tickers.size();
+    String[] tArray = new String[numTickers];
+    int t=0;
+    for(String tick: tickers) {
+      tArray[t++] = tick;
+    }
     
-    
-    double totalYield = 0;
     double weight = 1.00/(double) tickers.size();
     
-    double startingBal = 100.00*tickers.size();
-    double endingBal= 0.00;
     
   //broker commission fee
     double commFee = 0.0;
     
+    //HashMap<String, Double[]> monthlyReturns = new HashMap<>();
+    Double[][] monthlyReturns = new Double[numTickers][];
+    
+    //save file name
+    String fileName = "Result.txt";
     
     //System.out.println("Size: "+tickers.size()+ " With weight: "+ weight);
     //for each stock
-    for (String ticker: tickers) {
+    for (int i=0;i<numTickers;i++) {
+      String ticker = tArray[i];
       //assuming equal weights
       
-      double y = (double) invest(data.stocks, ticker, 20, 2, 100, true, 0.0, commFee);
-      //System.out.println("Adding Yield: "+y+ " With weight: "+ weight);
-      endingBal += y;
       
+      //calculate monthly returns
+      Double[] r = invest(data.dates,data.stocks, ticker, 20, 2, 100, true, 0.0, commFee);
       
+      monthlyReturns[i]=r;
+      
+      System.out.println("Monthly Return for "+ticker+" is: "+ Arrays.toString(r));
+      toFile(fileName,ticker+ " " + Arrays.toString(r)+"\n");
+    }
+    
+    //calculate portfolio monthly returns
+    int months = monthlyReturns[0].length;
+    double[] pMonthRet = new double[months];
+    
+    //loop through each month
+    for(int j=0;j<months;j++) {
+      
+      double ret = 0.0;
+      //loop through each stock's return at that month
+      //sum up the weighted returns
+      for(int i=0; i<monthlyReturns.length;i++) {
+        ret += monthlyReturns[i][j]*weight;
+      }
+      
+      pMonthRet[j] = ret;
       
     }
     
-    double rateOfReturn = ror(startingBal,endingBal);
-    double annualY = cagr(startingBal,endingBal,5934/365);
-    System.out.println("Overall Portfolio return: " + rateOfReturn);
-    System.out.println("Overall Portfolio yield, annualized: " + annualY);
+    
+    
+    System.out.println("Portfolio Monthly Return: " + Arrays.toString(pMonthRet));
+    toFile(fileName,"Portfolio " + Arrays.toString(pMonthRet));
+    
     
   }
   
   /**
-   * 
+   * Returns an array of monthly returns from 1/2/2006 to 4/1/2022
+   * monthly returns are calculated by taking a snapshot of the portfolio 
+   * by "closing" all positions on the end of the month and immediately re-open them
+   * There are 195 months
    * @param prices
    * @param n period in days for avg and stdev, e.g., 30
    * @param k times of stdev for upper/lower band, e.g., 1
@@ -64,21 +104,74 @@ public class MeanReversion {
    * @param investAmount percentage of portfolio to invest 1-invest everything; 0.5-invest half; 0-invest in only 1 share
    * @return
    */
-  private static double invest(HashMap<String, Double[]> stocks,String ticker, int n, int k, double money, boolean allowShort, double investAmount, double commFee) {
+  private static Double[] invest(List<Calendar> dates, HashMap<String, Double[]> stocks,String ticker, int n, int k, double money, boolean allowShort, double investAmount, double commFee) {
     double bgBal = money;
     Double[] prices = stocks.get(ticker);
     
+    //there are 195 months so 195 monthly returns
+    Double[] mr = new Double[195];
     
     double position = 0;
-    int days = 0;
     
-  //loop each day's price
-    for (int i=0;i<prices.length; i++) {
-      double p = prices[i];
-      //go to next value if the current is invalid
-      if (p<0) continue;
+    //starting date
+    String startDate = "01/02/2006";
+    String endDate = "04/01/2022";
+    SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy");
+    Calendar cur = Calendar.getInstance();
+    Calendar end = Calendar.getInstance();
+    try {
+      cur.setTime(sdf.parse(startDate));
+      end.setTime(sdf.parse(endDate));
+    } catch (ParseException e) {
+      // TODO Auto-generated catch block
+      e.printStackTrace();
+    }
+    
+    
+    int i = 0;//the index of price
+    int months = 0;
+    
+    //loop each day
+    for(;cur.before(end);cur.add(Calendar.DATE, 1)) {
       
-      days ++;
+      //if on the last day
+      if(cur.get(Calendar.DATE)==cur.getActualMaximum(Calendar.DAY_OF_MONTH)) {
+        //generate snapshot
+        
+        
+        //fake closing positions
+        double endBal = money;
+        endBal += position*prices[i];
+        endBal -= position*prices[i]*commFee;
+        
+        //record the return
+        double curMonthRet = ror(bgBal,endBal);
+        mr[months]=curMonthRet;
+        //System.out.println("On "+cur.getTime().toString()+", Got a Monthly return of "+ curMonthRet);
+        
+        //set the end as next month's beginning balance
+        bgBal = endBal;
+        months++;
+      }
+      
+      //check if today is not a trading day
+      //i.e., trading day is after day
+      //skip today then
+      if(dates.get(i).after(cur)) {
+        //System.out.println("Skipping because current is "+ cur.getTime().toString() + " and next trading day is " + dates.get(i).getTime().toString());
+        continue;
+      }
+      
+      double p = prices[i];
+      
+      //go to next value if the current is invalid
+      if (p<0) {
+        i++;
+        continue;
+        }
+      
+      //BELOW IS SKIPPED if the current price is invalid
+      
       //compute moving average
       if(i>=n-1 && prices[i-n+1]>=0) {
         
@@ -129,21 +222,16 @@ public class MeanReversion {
         } else if (Math.abs(z) <0.5) {
           //close if near moving average
           money += position*prices[i];
-          //System.out.printf("Closing Position of %d shares, gaining/spending $%f%n",position,position*prices[i]);
           money -= amount*commFee;
           position = 0;
         }
         
       }
       
+      i++;
     }
     
-    //252.75 is the trading days in a year
-    //annual yield/growth rate
-    double yield = ror(bgBal, money);
-    
-    System.out.println("Invested "+bgBal+" in "+ticker+", gained : "+ money + ", Yield = " + yield);
-    return money;
+    return mr;
   }
   
   /**
@@ -170,5 +258,18 @@ public class MeanReversion {
   private static double aroi(double roi, double t) {
     return Math.pow((1+roi),1/t)-1;
   }
+  
+  public static void toFile(String fileName,String str) 
+      {
+        try {
+          BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, true));
+          writer.append(str);
+          writer.close();
+        } catch (IOException e) {
+          System.out.println("Error occured while writing file!");
+          e.printStackTrace();
+        }
+        
+    }
 
 }
